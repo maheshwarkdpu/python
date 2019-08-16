@@ -1,0 +1,193 @@
+#! /usr/bin/python3.6
+
+from ecc_lib import *
+
+prime = 2**255 - 19
+A24 = 0x01DB42
+order = 2**252 + 0x14def9dea2f79cd65812631a5cf5d3ed
+u = 9
+
+
+
+def gen_ecc_add(x1,z1,x2,z2,xp):
+    #xp = 9
+    #xp = (x2 - x1)%prime
+    print(" xp = ",hex(xp))
+    rx1,rz1,rx2,rz2 = x25519_ladder_step(x1,z1,x2,z2,xp,A24,prime)
+    return(rx2,rz2)
+
+
+debug = 1
+
+K = 0x4000000000000000000000000000000000000000000000000000000000000000
+D = 0x4000000000000000000000000000000000000000000000000000000000000008
+Z = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+print("--------------ECDSA--Sign-------------------")
+# 1.Calculate e={HASH}(m).
+# 2.Let z be the L_{n} leftmost bits of e, where L_{n} is the bit length of the group order n.
+# 3.Select a cryptographically secure random integer k from [1,n-1].
+# 4.Calculate the curve point (x1,y1) = k *  G.
+# 5.Calculate r=x1 mod n. If r=0, go back to step 3.
+# 6.Calculate s= inv(k) (z + rd) n. If s=0, go back to step 3.
+# 7.The signature is the pair (r,s).
+
+
+rx,rz = ecc_mul_x25519(u,K,A24,prime)
+if(debug):
+    print(" RX = ", hex(rx))
+    print(" RZ = ", hex(rz))
+inv_rz = pow(rz,(prime-2),prime)
+rx = (rx * inv_rz)%prime
+
+
+
+R = rx
+# Inverse(K)
+inv_k = pow(K, (order-2), order)
+rd = (R * D)%order
+zprd = (Z + rd)%order
+S = (inv_k * zprd)%order
+
+if(debug):
+    print("Sign R = ", hex(R))
+    print("Sign S = ", hex(S))
+    print(" D = ", hex(D))
+    print(" K = ", hex(K))
+    print(" inv_K = ", hex(inv_k))
+    print(" Z = ", hex(Z))
+
+
+#Generate public key Q = D * G
+
+rx,rz = ecc_mul_x25519(u,D,A24,prime)
+if(debug):
+    print(" after D * G(x,z) ")
+    print(" X = ", hex(rx))
+    print(" Z = ", hex(rz))
+inv_rz = pow(rz,(prime-2),prime)
+rx = (rx * inv_rz)%prime
+Qx = rx
+Qz = (rz * inv_rz)%prime
+if(debug):
+    print(" Qx = ", hex(Qx))
+    print(" Qz = ", hex(Qz))
+
+
+
+
+print("\n\n--------------ECDSA--Verify-------------------")
+# 1. Calculate e={HASH}(m).
+# 2. Let z be the L_{n} leftmost bits of e, where L_{n} is the bit length of the group order n.
+# 3. Calculate u1 = z * inv(s), u2 = r * inv(s) mod n.
+# 4. Calculate (x1, y1) = u1 * G(x,y) + u2 * Q(x,y).
+# 5. Signature is valid if x1 == r, else invalid.
+
+#w = Inverse(S)
+w = pow(S,(order-2),order)
+if(debug):
+    print(" w = Inverse(S) ", hex(w))
+
+#u1 = z * w
+u1 = (Z * w)%order
+u1 = u1 << 3  #mahesh 
+if(debug):
+    print(" u1 = zw ", hex(u1))
+
+# u2 = R * w
+u2 = (R * w)%order
+u2 = u2 << 3  #mahesh 
+if(debug):
+    print(" u2 = rw ", hex(u2))
+
+# u1 * G(x,z)
+rx,rz = ecc_mul_x25519_no_mask(u,u1,A24,prime)
+if(debug):
+    print(" after u1 * G(x,y) ")
+    print(" X = ", hex(rx))
+    print(" Z = ", hex(rz))
+
+inv_rz = pow(rz,(prime-2),prime)
+rx = (rx * inv_rz)%prime
+rz = (rz * inv_rz)%prime
+if(debug):
+    print(" x = ", hex(rx))
+    print(" z = ", hex(rz))
+    print()
+
+# u2 * Q(x,y)
+sx,sz = ecc_mul_x25519_no_mask(Qx,u2,A24,prime)
+if(debug):
+    print(" after u2 * Q(x,y) ")
+    print(" X = ", hex(sx))
+    print(" Z = ", hex(sz))
+inv_sz = pow(sz,(prime-2),prime)
+sx = (sx * inv_sz)%prime
+sz = (sz * inv_sz)%prime
+if(debug):
+    print(" x = ", hex(sx))
+    print(" z = ", hex(sz))
+    print()
+
+print("\n\n--------------Find ry, sy -------------------")
+ry = mont_recover_y(rx,prime)
+print(" rx : ", hex(rx))
+print(" ry : ", hex(ry))
+sy = mont_recover_y(sx,prime)
+print(" sx : ", hex(sx))
+print(" sy : ", hex(sy))
+
+print("\n\n--------------Find alpha -------------------")
+#alpha = x'/z' - x/z 
+print("\n alpha = x'/z' - x/z  ")
+alpha  = (sx - rx ) % prime
+print(" alpha : ",hex(alpha))
+
+print("\n\n--------------Find beta -------------------")
+#beta = A + x/z + x'/z'
+print("\n beta = A + x/z + x'/z' ")
+beta =  (486662 + rx + sx)%prime 
+print(" beta : ",hex(beta))
+
+print("\n\n--------------Find X(Q - Q') -------------------")
+#X(Q-Q') = ( (-y' - y)/alpha)^2  - beta
+
+inv_alpha = pow(alpha,prime-2,prime)
+x_Q_Q1 =  ( ((((prime-sy) - ry)*inv_alpha)**2) - beta)  % prime
+
+print(" x_Q_Q1 : ",hex(x_Q_Q1))
+xp = (x_Q_Q1)%prime
+
+
+#  (u1*G(x,z)  + u2*Q(x,z) 
+if(debug):
+    print(" Point-Add inputs : ")
+    print(" RX = ", hex(rx))
+    print(" RZ = ", hex(rz))
+    print(" SX = ", hex(sx))
+    print(" SZ = ", hex(sz))
+rx,rz = gen_ecc_add(rx,rz,sx,sz,xp)
+
+if(debug):
+    print(" after (u1 * G(x,z)   +   u2*Q(x,z)  ")
+    print(" X = ", hex(rx))
+    print(" Z = ", hex(rz))
+inv_rz = pow(rz,(prime-2),prime)
+rx = (rx * inv_rz)%prime
+if(debug):
+    print(" x = ", hex(rx))
+    print()
+
+if(rx == R):
+    print(" Ecdsa Sign/Verify PASSED")
+    if(debug):
+        print(" rx : ", hex(rx))
+        print(" R :  ", hex(R))
+else:
+    print(" Ecdsa Sign/Verify FAILED ")
+    if(debug):
+        print(" rx : ", hex(rx))
+        print(" R :  ", hex(R))
+
+
+

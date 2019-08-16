@@ -1,0 +1,553 @@
+
+
+debug=0
+
+#/*** 
+# **  Syntax:
+# **    fecc_point_double()
+# ** 
+# **  Description:
+# **    This subroutine does the doubling of a point, P1(X1,Y1,Z1) on ecc 
+# **    curve where P1 != PAI(point at infinity) in homogeneous coordinate
+# **    system as defined in RFC6090.
+# **    The resulting point, P3(X3,Y3,Z3) also lies on the ecc curve.
+# ** 
+# **  Inputs:
+# **    P1(X1,Y1,Z1) 
+# **    PRIME 
+# **     
+# **  Output:
+# **    P3(X3,Y3,Z3) 
+# **   
+# **  Registers Modified:
+# **    All
+# ** 
+# **  Implementation Algorithm:
+# **  s1: D4 = Y*Z
+# **  s2: D7 = D4*D4
+# **  s3: D8 = D4*D7
+# **  s4: Z3 = 8*D8
+# **  s5: D1 = X*X
+# **  s6: W2 = 3*D1
+# **  s7: D3 = Z*Z
+# **  s8: a = prime - 3
+# **  s9: W1 = a*D3
+# **  s10: W = W1 + W2
+# **  s11: D5 = X*Y
+# **  s12: D6 = D4*D5
+# **  s13: D9 = W*W
+# **  s14: H1 = 8*D6
+# **  s15: H = D9-H1
+# **  s16: T1 = H*D4
+# **  s17: X3 = 2*T1
+# **  s18: T2 = 4*D6
+# **  s19: T3 = T2-H
+# **  s20: T4 = W*T3
+# **  s21: D2 = Y*Y
+# **  s22: T5 = D2*D7
+# **  s23: T6 = 8*T5
+# **  s24: Y3 = T4-T6
+# **  
+# ***/
+
+def ecc_double(X,Y,Z,a,p):
+    if((X==0)and(Y==1)and(Z==0)):
+        x3=0
+        y3=1
+        z3=0
+        return(x3,y3,z3)
+    #print(" ecc_double inputs : X,Y,Z")
+    #print(" X1 : ",hex(X))
+    #print(" Y1 : ",hex(Y))
+    #print(" Z1 : ",hex(Z))
+    d4 = (Y*Z)%p
+    d7 = (d4*d4)%p
+    d8 = (d4*d7)%p
+    z3 = (8*d8)%p
+    d1 = (X*X)%p
+    w2 = (3*d1)%p
+    d3 = (Z*Z)%p
+    w1 = (a*d3)%p
+    w  = (w1+w2)%p
+    d5 = (X*Y)%p
+    d6 = (d4*d5)%p
+    d9 = (w*w)%p
+    h1 = (8*d6)%p
+    h  = (d9-h1)%p
+    t1 = (h*d4)%p
+    x3 = (2*t1)%p
+    t2 = (4*d6)%p
+    t3 = (t2-h)%p
+    t4 = (w*t3)%p
+    d2 = (Y*Y)%p
+    t5 = (d2*d7)%p
+    t6 = (8*t5)%p
+    y3 = (t4-t6)%p
+
+    #print(" ecc_double:result X,Y,Z")
+    #print(" X : ",hex(x3))
+    #print(" Y : ",hex(y3))
+    #print(" Z : ",hex(z3))
+    return(x3,y3,z3)
+
+#Hardware algorithm:
+#if (P=∞)
+#return ∞
+#S = 4*Xp*Yp^2
+#M = 3*(Xp + Zp^2)*(Xp - Zp^2)
+#Xr = M^2 - 2*S
+#Yr = M*(S - Xr) - 8*Yp^4
+#Zr = 2*Yp*Zp
+
+def ecc_double_jacobian(X,Y,Z,a,p):
+    if((X==1)and(Y==1)and(Z==0)):
+        x3=1
+        y3=1
+        z3=0
+        return(x3,y3,z3)
+    S = (4 * X * Y * Y)%p
+    M = (3 * (X+(Z*Z))*(X-(Z*Z)))%p
+    x3 = ((M*M) - (2*S))%p
+    y3 = ((M*(S-x3)) - (8*Y*Y*Y*Y))%p
+    z3 = (2*Y*Z)%p
+    return(x3,y3,z3)
+     
+
+#/*** 
+# **  Syntax:
+# **    fecc_point_addition()
+# ** 
+# **  Description:
+# **    This subroutine does the addition of two points, P1(X1,Y1,Z1) and 
+# **    P2(X2,Y2,Z2) on ecc curve where P1 != P2 in homogeneous coordinate
+# **    system as defined in RFC6090. The points P1 and P2 are not at
+# **    PAI(point at infinity).
+# **    The resulting point, P3(X3,Y3,Z3) also lies on the ecc curve.
+# ** 
+# **  Inputs:
+# **    P1(X1,Y1,Z1) 
+# **    P2(X2,Y2,Z2) 
+# **    PRIME 
+# **     
+# **  Output:
+# **    P3(X3,Y3,Z3) 
+# **   
+# **  Registers Modified:
+# **    All
+# ** 
+# **  Implementation Algorithm:
+# **  s1:  U1 = Z1 * Y2
+# **  s2:  U2 = Z2 * Y1
+# **  s3:  V1 = Z1 * X2
+# **  s4:  V2 = Z2 * X1
+# **  s5: if (V1 == V2) ; this condition handles if P1 == P2
+# **      {
+# **        if (U1 != U2)
+# **          return POINT_AT_INFINITY
+# **        else
+# **          return POINT_DOUBLE(X1,Y1,Z1)
+# **      }
+# **  s6:  W  = Z1 * Z2
+# **  s7:  U  = U1 - U2
+# **  s8:  V  = V1 - V2
+# **  s9:  T1 = U1 = U^2 = U * U
+# **  s10: T2 = V1 = V^2 = V * V
+# **  s11: T4 = V2 = V^2 * V2 = T2 * V2
+# **  s12: T5 = U2 = V^3 * U2 = T3 * U2
+# **  s13: T3 = V1 = V^3 = T2 * V
+# **  s14: T6 = U1 = T1 * W
+# **  s15: A1 = U1 = T6 - T3
+# **  s16: Z3 = T3 * W
+# **  s17: T7 = V1 = 2 * T4
+# **  s17: A1 = U1 = A1 - T7 
+# **  s18: T8 = V2 = T4 - A1
+# **  s20: T9 = U1 = U * T8
+# **  s21: X3 = V * A1
+# **  s22: Y3 = T9 - T5
+# ** 
+# ***/
+def ecc_add(x1,y1,z1,x2,y2,z2,a,p):
+    if((x1==0)and(y1==1)and(z1==0)):
+        x3=x2
+        y3=y2
+        z3=z2
+        return(x3,y3,z3)
+    if((x2==0)and(y2==1)and(z2==0)):
+        x3=x1
+        y3=y1
+        z3=z1
+        return(x3,y3,z3)
+    #print(" ecc_add inputs : X,Y,Z")
+    #print(" X1 : ",hex(x1))
+    #print(" Y1 : ",hex(y1))
+    #print(" Z1 : ",hex(z1))
+    #print()
+    #print(" X2 : ",hex(x2))
+    #print(" Y2 : ",hex(y2))
+    #print(" Z2 : ",hex(z2))
+    u1 = (z1*y2)%p
+    u2 = (z2*y1)%p
+    v1 = (z1*x2)%p
+    v2 = (z2*x1)%p
+
+    if (v1 == v2):
+        if (u1 != u2):
+            #print("\n we hit (u1 != u2) ")
+            x3=0
+            y3=1
+            z3=0
+            return(x3,y3,z3)
+        else:
+            return ecc_double(x1,y1,z1,a,p)
+
+    w = (z1*z2)%p
+    u = (u1-u2)%p
+    v = (v1-v2)%p
+
+    t1 = (u*u)%p
+    t2 = (v*v)%p
+    t4 = (t2*v2)%p
+    t3 = (t2*v)%p
+    t5 = (t3*u2)%p
+    t6 = (t1*w)%p
+    a1 = (t6-t3)%p
+    z3 = (t3*w)%p
+    t7 = (2*t4)%p
+    a1 = (a1-t7)%p
+    t8 = (t4-a1)%p
+    t9 = (u*t8)%p
+    x3 = (v*a1)%p
+    y3 = (t9-t5)%p
+
+    #print(" ecc_add:results  X,Y,Z")
+    #print(" X : ",hex(x3))
+    #print(" Y : ",hex(y3))
+    #print(" Z : ",hex(z3))
+    return (x3,y3,z3)
+
+
+#Hardware algorithm:
+#if (Q=∞
+#return (Xp,Yp,Zp)
+#if (P=∞)
+#return (Xq,Yq,Zq)
+#U1 = Xp * Zq^2
+#U2 = Xq * Zp^2
+#S1 = Yp * Zq^3
+#S2 = Yq * Zp^3
+#if (U1 == U2)
+#if (S1 != S2)
+#return ∞
+#else
+#return POINT_DOUBLE(Xp, Yp, Zp)
+#H = U2 - U1
+#R = S2 - S1
+#T = H^3 + 2*U1*H^2
+#X3 = R^2 - T
+#Y3 = R*(U1*H^2 - X3) - S1*H^3
+#Z3 = H*Zp*Zq
+
+def ecc_add_jacobian(x1,y1,z1,x2,y2,z2,a,p):
+    if((x1==1)and(y1==1)and(z1==0)):
+        x3=x2
+        y3=y2
+        z3=z2
+        return(x3,y3,z3)
+    if((x2==1)and(y2==1)and(z2==0)):
+        x3=x1
+        y3=y1
+        z3=z1
+        return(x3,y3,z3)
+    U1 = (x1*z2*z2)%p
+    U2 = (x2*z1*z1)%p
+    S1 = (y1*z2*z2*z2)%p
+    S2 = (y2*z1*z1*z1)%p
+    if(U1 == U2):
+        if(S1 != S2):
+            return(1,1,0)
+        else:
+            return(ecc_double_jacobian(x1,y1,z1,a,p))
+    H = (U2 - U1)%p
+    R = (S2 - S1)%p
+    T = ((H*H*H) + (2*U1*H*H))%p
+    x3 = ((R*R)- T)%p
+    y3 = ((R*((U1*H*H)-x3))-(S1*H*H*H))%p
+    z3 = (H*z1*z2)%p
+    return (x3,y3,z3)
+
+
+def ecc_mul(x1,y1,z1,scalar,a,p):
+    x2 = 0
+    y2 = 1
+    z2 = 0
+    while scalar > 0:
+        #print("\n --------------------------scalar : ",hex(scalar))
+        if (scalar%2)>0:
+            x2,y2,z2 = ecc_add(x1,y1,z1,x2,y2,z2,a,p)
+        x1,y1,z1 = ecc_double(x1,y1,z1,a,p)
+        scalar=scalar//2
+    return (x2,y2,z2)
+
+
+
+
+
+def ecc_mul_jacobian(x1,y1,z1,scalar,a,p):
+    x2 = 1
+    y2 = 1
+    z2 = 0
+    while scalar > 0:
+        #print("\n --------------------------scalar : ",hex(scalar))
+        if (scalar%2)>0:
+            x2,y2,z2 = ecc_add_jacobian(x1,y1,z1,x2,y2,z2,a,p)
+        x1,y1,z1 = ecc_double_jacobian(x1,y1,z1,a,p)
+        scalar=scalar//2
+    return (x2,y2,z2)
+
+
+
+def fpm_table(px,py,pz,a,p,prime_length,w):
+
+    array = [[0,1,0],[0,1,0],[0,1,0],[0,1,0]]
+    table = [
+                [0,1,0],[0,1,0],[0,1,0],[0,1,0],
+                [0,1,0],[0,1,0],[0,1,0],[0,1,0],
+                [0,1,0],[0,1,0],[0,1,0],[0,1,0],
+                [0,1,0],[0,1,0],[0,1,0],[0,1,0],
+            ]
+
+
+    #   //window size is 4
+    #   //prime length in bytes
+    #   if      (prime_length == 20) { d = 192/4; }  /* Curve P160 */
+    #   else if (prime_length == 24) { d = 192/4; }  /* Curve P192 */
+    #   else if (prime_length == 28) { d = 256/4; }  /* Curve P224 */
+    #   else if (prime_length == 32) { d = 256/4; }  /* Curve P256 */
+    #   else if (prime_length == 40) { d = 320/4; }  /* Curve P320 */
+    #   else if (prime_length == 48) { d = 384/4; }  /* Curve P384 */
+    #   else if (prime_length == 64) { d = 512/4; }  /* Curve P512 */
+    #   else if (prime_length == 66) { d = 576/4; }  /* Curve P521 */
+    #
+    d = (((prime_length+7)>>3)<<3)      #ROUNDUP8 in bytes
+    d = d<<3                            #in bits
+    d = d//w                            #w=window_size
+
+    print("d = ", d)
+    
+    #//      Compute the 4 co-efficiants 	P, 
+    #//      				(2^d)*P, 
+    #//      				(2^(2*d))*P 
+    #//      				(2^(3*d))*P
+    #//                  where d = (t/w) t=256/384 w=4. Place at PRE_COFFS
+    #//
+    #//
+    #// 2^(d-1)*P , . . . . . . . . . . . .  . . . . . . . . . . . , P
+    #// 2^(2d-1)*P, . . . . . . . . . . . .  . . . . . . . . . . . , 2^(1*d)*P
+    #// 2^(3d-1)*P, . . . . . . . . . . . .  . . . . . . . . . . . , 2^(2*d)*P
+    #// 2^(4d-1)*P, . . . . . . . . . . . .  . . . . . . . . . . . , 2^(3*d)*P
+    #//
+    #//			i.e
+    #//
+    #//Example m=256, w =4, and d = (m/w) = (256/4) = 64
+    #//
+    #// 2^(63)*P , . . . . . . . . . . . .  . . . . . . . . . . . , P
+    #// 2^(127)*P, . . . . . . . . . . . .  . . . . . . . . . . . , 2^(64)*P
+    #// 2^(191)*P, . . . . . . . . . . . .  . . . . . . . . . . . , 2^(2*64)*P
+    #// 2^(255)*P, . . . . . . . . . . . .  . . . . . . . . . . . , 2^(3*64)*P
+    #//								|
+    #//								|
+    #//							     co-efficiants
+    j=0
+    while(j<w): #	/* 4 co-efficiants  */
+        #/* Set each co-efficiant into an array */
+        array[j][0] = px
+        array[j][1] = py
+        array[j][2] = pz
+        if(j == (w-1)):
+            break
+        #// below loop computes (2^64)*P, (2^(2*64))*P, (2^(3*64))*P,
+        #//
+        #// Example to calculate (2^64)*P
+        #//		=  P
+        #//		=    P +   P  =    2P  =  (2^1)*P
+        #//		=   2P +  2P  =    4P  =  (2^2)*P
+        #//		=   4P +  4P  =    8P  =  (2^3)*P
+        #//		=   8P +  8P  =   16P  =  (2^4)*P
+        #//		=  16P + 16P  =   32P  =  (2^5)*P
+        #//		.
+        #//		.
+        #//		.
+        #//		64 times ...
+        #//		=  (2^64)*P
+        #//
+        #// Example to calculate (2^(2*64))*P
+        #// Assume what you got final result above as P and do step as above.
+        i=0
+        while(i<d): #	//d = (t/w) = (256/384)/4 = 64/96 times
+            #EC_POINT_dbl(group, R, P, ctx);
+            #EC_POINT_copy(P,R);
+            rx,ry,rz = ecc_double(px,py,pz,a,p)
+            px = rx
+            py = ry
+            pz = rz
+            i+=1
+        j+=1
+
+    #print(" Array START \n")
+    j=0
+    while(j<(w)): 
+        #print(hex(array[j][0]))
+        #print(hex(array[j][1]))
+        #print(hex(array[j][2]))
+        #print("\n")
+        j+=1
+    #print(" Array ENDS \n")
+
+
+    #//					if d = 64
+    #//Now x[0] and y[0] has (2^(0*d))*P	=  P
+    #//	 x[1] and y[1] has (2^(1*d))*P	= (2^64)*P
+    #//	 x[2] and y[2] has (2^(2*d))*P	= (2^(2*64))*P
+    #//	 x[3] and y[3] has (2^(3*d))*P	= (2^(3*64))*P
+    #//
+    #//Let x[0] and y[0] as P0
+    #//	 x[1] and y[1] as P1
+    #//	 x[2] and y[2] as P2
+    #//	 x[3] and y[3] as P3
+    #//
+    #//compute the points
+    #//	Q(15) + (Q(15)+Q(14)) + (Q(15)+Q(14)+Q(13)) + ...  14 terms
+    #//
+    #//
+    #//The following loop computes 
+    #//For each loop set R <-- 0
+    #//For i =  1 ==>  0x0001   computes 	R <-- R + P0
+    #//For i =  2 ==>  0x0010   computes 	R <-- R + P1
+    #//For i =  3 ==>  0x0011   computes 	R <-- R + P0 + P1
+    #//For i =  4 ==>  0x0100   computes 	R <-- R + P2
+    #//For i =  5 ==>  0x0101   computes 	R <-- R + P0 + P2
+    #//For i =  6 ==>  0x0110   computes 	R <-- R + P1 + P2
+    #//For i =  7 ==>  0x0111   computes 	R <-- R + P0 + P1 + P2
+    #//For i =  8 ==>  0x1000   computes 	R <-- R + P3
+    #//For i =  9 ==>  0x1001   computes 	R <-- R + P0 + P3
+    #//For i = 10 ==>  0x1010   computes 	R <-- R + P1 + P3
+    #//For i = 11 ==>  0x1011   computes 	R <-- R + P0 + P1 + P3
+    #//For i = 12 ==>  0x1100   computes 	R <-- R + P2 + P3
+    #//For i = 13 ==>  0x1101   computes 	R <-- R + P0 + P2 + P3
+    #//For i = 14 ==>  0x1110   computes 	R <-- R + P1 + P2 + P3
+    #//For i = 15 ==>  0x1111   computes 	R <-- R + P0 + P1 + P2 + P3
+    #//
+    #//
+    #//Since window = 4 and with [a3,a2,a1,a0] there are 1 to ((2^w) - 1)
+    #//i.e 1 to 15 points are needed for calculating kP
+    i=1
+    while(i<(w**2)): 
+        #EC_POINT_set_to_infinity(group, R);	//R <-- O;	//set to infinity
+        rx = 0
+        ry = 1
+        rz = 0
+        j=0
+        while(j<(w)):
+            #//it check no. of bits in "i" variabe.
+            #//if i(j) == 1  then R = R + P
+            if((i>>j) & 1):
+                #print("i = ", i, "j = ", j)
+                #print(i>>j)
+                #EC_POINT_set_affine_coordinates_GFp(group,P,x[j],y[j],ctx);		//set P <--- (x[j],y[j])
+                px = array[j][0]
+                py = array[j][1]
+                pz = array[j][2]
+                #EC_POINT_add(group, R, R, P, ctx);	//R <-- R + P
+                rx,ry,rz = ecc_add(rx,ry,rz,px,py,pz,a,p)
+    
+                #inv_rz = pow(rz,(p-2),p)
+                #rx = (rx * inv_rz)%p
+                #ry = (ry * inv_rz)%p
+                #rz = (rz * inv_rz)%p
+            j+=1
+        table[i-1][0] = rx
+        table[i-1][1] = ry
+        table[i-1][2] = rz
+        #print("i = ", i)
+        #print("\n table[",i-1,"][0] : ",hex(rx)," ")
+        #print("\n table[",i-1,"][1] : ",hex(ry)," ")
+        #print("\n table[",i-1,"][2] : ",hex(rz)," ")
+        #print("\n")
+        i+=1
+    return(table)
+
+def ecc_mul_fpm(table,scalar,a,p,prime_length,w):
+# From GuidetoEllipticCurveCryptography.pdf
+# Algorthm 3.44 Fixed-base comb method for point multiplication
+#INPUT: Window width w, d = t/w, k = (kt−1, . . ., k1, k0)2, P ∈ E(Fq ).
+#OUTPUT: kP.
+#1. Precomputation. Compute [aw−1, . . .,a1,a0]P for all bit strings (aw−1, . . ., a1,a0) of length w.
+#2. By padding k on the left with 0s if necessary, write k = Kw−1 · · ·K1K0, where each K j is a bit string of length d. Let K j i denote the i th bit of K j .
+#3. Q←∞.
+#4. For i from d −1 downto 0 do
+#   4.1 Q←2Q.
+#   4.2 Q←Q +[Kw−1 i , . . ., K1 i , K0 i ]P.
+#5. Return(Q).
+
+
+    d = (((prime_length+7)>>3)<<3)      #ROUNDUP8 in bytes
+    d = d<<3                            #in bits
+    d = d//w                            #w=window_size
+
+
+    i=(d-1)
+    rx = 0
+    ry = 0
+    rz = 0
+    flag = 0
+    while(i>=0):
+        c0 = (scalar>>i)&1
+        c1 = (scalar>>(i+d))&1
+        c2 = (scalar>>(i+(d<<1)))&1
+        c3 = (scalar>>(i+(d<<2)-(d)))&1
+        combination = (c3<<3) | (c2<<2) | (c1<<1) | (c0<<0)
+        if(debug):
+            print(" iteration = ", i)
+            print(" c3",c3," c2=",c2," c1=",c1," c0= ",c0)
+            print(" combination = ", hex(combination)," flag = ", flag)
+    
+        if(flag == 1):
+            if(debug):
+                print("double inputs : ")
+                print("rx : ",hex(rx))
+                print("ry : ",hex(ry))
+                print("rz : ",hex(rz))
+            rx,ry,rz = ecc_double(rx,ry,rz,a,p)
+            if(debug):
+                print("double outputs : ")
+                print("rx : ",hex(rx))
+                print("ry : ",hex(ry))
+                print("rz : ",hex(rz))
+        if(combination != 0):
+            px = table[combination-1][0]
+            py = table[combination-1][1]
+            pz = table[combination-1][2]
+    
+            if(debug):
+                print("add inputs : ")
+                print("rx : ",hex(rx))
+                print("ry : ",hex(ry))
+                print("rz : ",hex(rz))
+                print("px : ",hex(px))
+                print("py : ",hex(py))
+                print("pz : ",hex(pz))
+            if(flag == 0):
+                rx,ry,rz = px,py,pz
+            else:
+                rx,ry,rz = ecc_add(rx,ry,rz,px,py,pz,a,p)
+                if(debug):
+                    print("add outputs : ")
+                    print("rx : ",hex(rx))
+                    print("ry : ",hex(ry))
+                    print("rz : ",hex(rz))
+            flag = 1
+    
+        i-=1
+    
+    return(rx,ry,rz)
+

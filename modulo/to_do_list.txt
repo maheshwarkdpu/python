@@ -1,0 +1,33 @@
+
+
+	1. RsaPrimeGen ---> Generante Primes P and Q.
+		FIPS-186-4 document
+		able to get P and Q for any mod_lengths
+
+	2. RSA Encryption/Decryption
+		c = m^e mod n;   m = m^d mod n
+
+	3. ModExp  and ModExp-CRT
+		c = b^e mod n
+		CRT components p,ep,q,eq,iqmp
+
+	4. ECC-ShortWiestrauss(NIST/Brainpool/Koblitz/FRP).
+	     Prime:
+		  1. Do mod_reduction based on NIST documents.
+		  2. Do point-multiply using NAF method
+
+	     Binary:
+		  1. Do binary ECC implementation
+
+
+	5.ECC-Montgomer/Edwards
+		1. Curve25519
+		2. Curve448
+
+
+	6. Ethereum Project
+
+
+	7. Poly1305 implementation.
+
+	8. Camellia(RFC 3713)
